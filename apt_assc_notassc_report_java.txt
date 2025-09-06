@@ -1,0 +1,781 @@
+package com.honeywell.coreptdu.datatypes.aptasscnotasscreport.serviceimpl;
+
+import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.context.annotation.RequestScope;
+
+import com.honeywell.coreptdu.datatypes.aptasscnotasscreport.block.RepBlk;
+import com.honeywell.coreptdu.datatypes.aptasscnotasscreport.block.Webutil;
+import com.honeywell.coreptdu.datatypes.aptasscnotasscreport.dto.request.AptAsscNotasscReportTriggerRequestDto;
+import com.honeywell.coreptdu.datatypes.aptasscnotasscreport.dto.response.AptAsscNotasscReportTriggerResponseDto;
+import com.honeywell.coreptdu.datatypes.aptasscnotasscreport.service.IAptAsscNotasscReportTriggerService;
+import com.honeywell.coreptdu.datatypes.coreptmenummb.serviceimpl.CoreptMenuMmbServiceImpl;
+import com.honeywell.coreptdu.datatypes.corepttemplate.serviceimpl.CoreptTemplateTriggerServiceImpl;
+import com.honeywell.coreptdu.datatypes.exportdestination.block.SelectOptions;
+import com.honeywell.coreptdu.datatypes.exportdestination.dto.request.ExportDestinationTriggerRequestDto;
+import com.honeywell.coreptdu.datatypes.exportdestination.dto.response.ExportDestinationTriggerResponseDto;
+import com.honeywell.coreptdu.exception.ExceptionUtils;
+import com.honeywell.coreptdu.exception.FormTriggerFailureException;
+import com.honeywell.coreptdu.global.dto.BaseResponse;
+import com.honeywell.coreptdu.global.dto.DuParameter;
+import com.honeywell.coreptdu.global.dto.Global;
+import com.honeywell.coreptdu.global.dto.ReportDetail;
+import com.honeywell.coreptdu.global.dto.ResponseDto;
+import com.honeywell.coreptdu.global.dto.SystemDto;
+import com.honeywell.coreptdu.global.forms.BlockDetail;
+import com.honeywell.coreptdu.global.forms.DbConstants;
+import com.honeywell.coreptdu.global.forms.DuEvent;
+import com.honeywell.coreptdu.global.forms.FormConstant;
+import com.honeywell.coreptdu.global.forms.WindowDetail;
+import com.honeywell.coreptdu.pkg.body.RefreshMasterLibrary;
+import com.honeywell.coreptdu.pkg.spec.IDisplayAlert;
+import com.honeywell.coreptdu.pll.CoreptLib;
+import com.honeywell.coreptdu.utils.common.DuConstants;
+import com.honeywell.coreptdu.utils.common.EParam;
+import com.honeywell.coreptdu.utils.dbutils.GenericNativeQueryHelper;
+import com.honeywell.coreptdu.utils.dbutils.IApplication;
+import com.honeywell.coreptdu.utils.oracleutils.DuRecord;
+import com.honeywell.coreptdu.utils.oracleutils.GenericTemplateForm;
+import com.honeywell.coreptdu.utils.oracleutils.HoneyWellUtils;
+import com.honeywell.coreptdu.utils.oracleutils.OracleHelpers;
+import com.honeywell.coreptdu.utils.oracleutils.RecordGroup;
+
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@Service
+@RequestScope
+public class AptAsscNotasscReportTriggerServiceImpl extends GenericTemplateForm<AptAsscNotasscReportTriggerServiceImpl>
+		implements IAptAsscNotasscReportTriggerService, FormConstant {
+
+	@Getter
+	@Setter
+	private Webutil webutil = new Webutil();
+	@Getter
+	@Setter
+	private RepBlk repBlk = new RepBlk();
+	@Getter
+	@Setter
+	private Global global = new Global();
+	@Getter
+	@Setter
+	private SystemDto system = new SystemDto();
+	@Getter
+	@Setter
+	private DuParameter parameter = new DuParameter();
+	@Getter
+	@Setter
+	private List<DuEvent> event = new ArrayList<>();
+	@Getter
+	@Setter
+	private HashMap<String, RecordGroup> groups = new HashMap<>();
+	@Autowired
+	private IApplication app;
+	@Autowired
+	private CoreptLib coreptLib;
+	@Autowired
+	private RefreshMasterLibrary refreshMasterLibrary;
+	@Autowired
+	private CoreptTemplateTriggerServiceImpl coreptTemplateTriggerServiceImpl;
+	@Getter
+	@Setter
+	private List<String> blocksOrder = new ArrayList<>();
+	@Getter
+	@Setter
+	private Map<String, WindowDetail> windows = new HashMap<>();
+	@Getter
+	@Setter
+	@Autowired
+	private GenericNativeQueryHelper genericNativeQueryHelper;
+	@Getter
+	@Setter
+	private SelectOptions selectOptions = new SelectOptions();
+	@Autowired
+	private CoreptMenuMmbServiceImpl coreptMenuMmbServiceImpl;
+	@Autowired
+	private IDisplayAlert displayAlert;
+
+	@Override
+	public void populateAGroup(String pGroupName) throws Exception {
+		log.info("populateAGroup Executing");
+		try {
+			RecordGroup lrGrp = null;
+			Integer lnCount = 0;
+			String lsRecgrpQuery = null;
+
+			lrGrp = findGroup(pGroupName);
+			if (!idNull(lrGrp)) {
+				deleteGroup(groups, "lrGrp");
+			}
+
+			if (Objects.equals(pGroupName, "DATA_SUPPLIER")) {
+				lsRecgrpQuery = "select data_supplier_name rlabel, data_supplier rvalue   from data_supplier";
+			}
+
+			else if (Objects.equals(pGroupName, "PROCESSING_CYCLE")) {
+				EParam.DYNAMIC_QUERY_ONE.setValue(repBlk.getDataSupplier());
+				lsRecgrpQuery = "select unique to_char(processing_cycle) rlabel,to_char(processing_cycle) rvalue from pl_tld_airport        where  data_supplier = (select data_supplier from data_supplier where data_supplier = '"
+						+ EParam.DYNAMIC_QUERY_ONE.getValue() + "') order by 1 desc";
+			}
+
+			lrGrp = createGroupFromQuery(pGroupName, lsRecgrpQuery);
+			groups.put(pGroupName, lrGrp);
+			lnCount = populateGroup(lrGrp);
+			populateList("REP_BLK." + pGroupName, lrGrp);
+			if (getGroupRowCount(lrGrp) > 0) {
+				copy(getGroupCharCell(pGroupName + ".rvalue", 0), "rep_blk." + pGroupName);
+			}
+			
+			log.info("" + lnCount);
+			log.info("populateAGroup Executed Successfully");
+		} catch (Exception e) {
+			log.error("Error while executing populateAGroup" + e.getMessage());
+			throw e;
+
+		}
+	}
+
+	@Override
+	public void initializeForm() throws Exception {
+		log.info("initializeForm Executing");
+		try {
+			defaultValue("MAXIMIZE", "global.status_window");
+			if (Objects.equals(nameIn(this, "global.status_window"), "MAXIMIZE")) {
+				setWindowProperty("baseWindow", WINDOW_STATE, MAXIMIZE);
+			}
+
+			else {
+				coreptLib.setWindowProperty("baseWindow", WINDOW_STATE, NORMAL);
+			}
+
+			log.info("initializeForm Executed Successfully");
+		} catch (Exception e) {
+			log.error("Error while executing initializeForm" + e.getMessage());
+			throw e;
+
+		}
+	}
+
+	@Override
+	public void unsetQueryMenuItems() throws Exception {
+		log.info("unsetQueryMenuItems Executing");
+		try {
+			String vBlock = DbConstants.REP_BLK;
+			if (Objects.equals(vBlock, "REP_BLK")) {
+				setMenuItemProperty(coreptLib.rtrim("Action") + "." + ltrim("Save"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Record") + "." + ltrim("Insert"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Record") + "." + ltrim("Remove"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Record") + "." + ltrim("Duplicate"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Record") + "." + ltrim("Clear"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Field") + "." + ltrim("Duplicate"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Main_Menu") + "." + ltrim("Action"), VISIBLE, BPROPERTY_TRUE);
+				setMenuItemProperty(rtrim("Edit"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Query"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Tools"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Query") + "." + ltrim("Enter"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Query") + "." + ltrim("Execute"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Query") + "." + ltrim("Cancel"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Query") + "." + ltrim("Cancel"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Tools") + "." + ltrim("Duplicate"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Tools") + "." + ltrim("Duplicate"), VISIBLE, BPROPERTY_FALSE);
+			}
+
+			else {
+				setMenuItemProperty(rtrim("Main_Menu") + "." + ltrim("Action"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Main_Menu") + "." + ltrim("Edit"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Main_Menu") + "." + ltrim("Block"), VISIBLE, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Field") + "." + ltrim("Duplicate"), ENABLED, BPROPERTY_FALSE);
+				setMenuItemProperty(rtrim("Field") + "." + ltrim("Clear"), ENABLED, BPROPERTY_FALSE);
+			}
+
+			log.info("unsetQueryMenuItems Executed Successfully");
+		} catch (Exception e) {
+			log.error("Error while executing unsetQueryMenuItems" + e.getMessage());
+			throw e;
+
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> whenNewFormInstance(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" whenNewFormInstance Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			setWindowProperty("", "title", "STD Apts as TLD and Assctd/NotAssctd with Apt Grps");
+			initializeForm();
+			unsetQueryMenuItems();
+			populateAGroup("DATA_SUPPLIER");
+			populateAGroup("PROCESSING_CYCLE");
+			global.setGFileName(null);
+			global.setGDelimiter(null);
+			global.setGCancel(null);
+			goBlock(DbConstants.REP_BLK, ALL_ROWS);
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" whenNewFormInstance executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the whenNewFormInstance Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> repBlkWhenNewBlockInstance(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" repBlkWhenNewBlockInstance Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			unsetQueryMenuItems();
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" repBlkWhenNewBlockInstance executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the repBlkWhenNewBlockInstance Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> repBlkDataSupplierWhenListChanged(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" repBlkDataSupplierWhenListChanged Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			populateAGroup("PROCESSING_CYCLE");
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" repBlkDataSupplierWhenListChanged executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the repBlkDataSupplierWhenListChanged Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> repBlkReportWhenButtonPressed(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" repBlkReportWhenButtonPressed Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			Integer count = 0;
+			if (Objects.equals(repBlk.getDataSupplier(), null)) {
+				coreptLib.dspMsg("Please select a data supplier.");
+				goItem("rep_blk.data_supplier");
+				throw new FormTriggerFailureException();
+
+			}
+
+			else if (Objects.equals(repBlk.getProcessingCycle(), null)) {
+				coreptLib.dspMsg("Please select a processing cycle.");
+				goItem("rep_blk.processing_cycle");
+				throw new FormTriggerFailureException();
+			}
+
+			count = export();
+			if (count > 0) {
+				callForm("exportdestination");
+			}
+
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" repBlkReportWhenButtonPressed executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the repBlkReportWhenButtonPressed Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> repBlkCloseWhenButtonPressed(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" repBlkCloseWhenButtonPressed Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			exitForm();
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" repBlkCloseWhenButtonPressed executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the repBlkCloseWhenButtonPressed Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<AptAsscNotasscReportTriggerResponseDto>> toolsExportDestination(
+			AptAsscNotasscReportTriggerRequestDto reqDto) throws Exception {
+		log.info(" export Executing");
+		BaseResponse<AptAsscNotasscReportTriggerResponseDto> responseObj = new BaseResponse<>();
+		AptAsscNotasscReportTriggerResponseDto resDto = new AptAsscNotasscReportTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			OracleHelpers.bulkClassMapper(this, coreptMenuMmbServiceImpl);
+			coreptMenuMmbServiceImpl.toolsExportFormData(this);
+			OracleHelpers.ResponseMapper(this, resDto);
+			log.info(" export executed successfully");
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the export Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+	}
+
+	public Integer export() throws Exception {
+		log.info("Executing Export ");
+		List<DuRecord> recs = null;
+		List<DuRecord> recs1 = null;
+		Integer lRecCount = 0;
+		Integer lRecCount1 = 0;
+		String selAptCur = "SELECT distinct --STD.*, \r\n" + "           SBAG.Group_Name,\r\n"
+				+ "           NAV.NavDB_ID,\r\n" + "           NAV.Data_Supplier,\r\n"
+				+ "           Include_Exclude_Ind,\r\n" + "           STD.Airport_Ident,\r\n"
+				+ "           STD.Airport_Icao,\r\n" + "           Production_Ready_Ind,\r\n"
+				+ "           Primary_Focal\r\n" + "      FROM SELECT_BY_AIRPORT_GROUP SBAG, \r\n"
+				+ "           AIRPORT_TO_SELECT ATS, \r\n" + "           NAVDB NAV,\r\n"
+				+ "           PL_TLD_AIRPORT TLD, \r\n" + "           PL_STD_AIRPORT STD\r\n"
+				+ "     WHERE SBAG.Select_by_ID = ATS.Select_by_ID\r\n"
+				+ "           AND NAV.NavDB_ID = SBAG.NavDB_ID\r\n"
+				+ "           AND NAV.NavDB_ID = TLD.Customer_Ident\r\n"
+				+ "           AND TLD.Airport_Ident = ATS.Airport_Ident\r\n"
+				+ "           --AND TLD.Airport_Icao = ATS.Airport_Icao\r\n"
+				+ "           AND STD.Airport_Ident = TLD.Airport_Ident\r\n"
+				+ "           --AND STD.Airport_Icao = TLD.Airport_Icao\r\n"
+				+ "           AND TLD.Data_Supplier = STD.Data_Supplier\r\n"
+				+ "           AND TLD.Data_Supplier = NAV.Data_Supplier\r\n"
+				+ "           AND TLD.Processing_Cycle = STD.Processing_Cycle\r\n"
+				+ "           AND STD.Processing_Cycle = ? \r\n" + "           AND STD.Data_Supplier = ?  \r\n"
+				+ "      ORDER BY STD.Airport_Ident,STD.Airport_Icao,Group_Name";
+		recs = app.executeQuery(selAptCur, repBlk.getProcessingCycle(), repBlk.getDataSupplier());
+
+		if (recs.size() > 0) {
+			lRecCount = lRecCount + 1;
+		}
+
+		String notselAptCur = "SELECT DISTINCT N.NavDB_ID,\r\n" + "		                N.Data_Supplier,\r\n"
+				+ "		                S.Airport_Ident Std_Airport_Ident,\r\n"
+				+ "		                S.Airport_Icao Std_Airport_Icao, \r\n"
+				+ "		                T.Airport_Ident Tld_Airport_Ident, \r\n"
+				+ "		                T.Airport_Icao Tld_Airport_Icao, \r\n"
+				+ "		                Production_Ready_Ind, \r\n" + "		                Primary_Focal \r\n"
+				+ "			FROM PL_STD_AIRPORT S, \r\n" + "			     PL_TLD_AIRPORT T, \r\n"
+				+ "			     NavDB N\r\n" + "			WHERE S.Airport_Ident = T.Airport_Ident\r\n"
+				+ "			--AND S.Airport_Icao = T.Airport_Icao\r\n"
+				+ "			AND S.Processing_Cycle = T.Processing_Cycle\r\n"
+				+ "			AND S.Data_Supplier = T.Data_Supplier\r\n"
+				+ "			AND S.Data_Supplier = N.Data_Supplier\r\n"
+				+ "			AND T.Customer_Ident = N.navdb_id\r\n" + "			AND S.Data_Supplier = ? \r\n"
+				+ "			AND S.Processing_Cycle = ? \r\n" + "			AND S.Airport_Ident--,S.Airport_Icao) \r\n"
+				+ "			NOT IN ( SELECT STD.Airport_Ident\r\n"
+				+ "           						--STD.Airport_Icao\r\n"
+				+ "      					 FROM SELECT_BY_AIRPORT_GROUP SBAG, \r\n"
+				+ "           						AIRPORT_TO_SELECT ATS, \r\n"
+				+ "           						NAVDB NAV,\r\n"
+				+ "           						PL_TLD_AIRPORT TLD, \r\n"
+				+ "           						PL_STD_AIRPORT STD\r\n"
+				+ "     						WHERE SBAG.Select_By_ID = ATS.Select_By_ID\r\n"
+				+ "           				AND NAV.NavDB_ID = SBAG.NavDB_ID\r\n"
+				+ "           				AND NAV.NavDB_ID = TLD.Customer_Ident\r\n"
+				+ "           				AND TLD.Airport_Ident = ATS.Airport_Ident\r\n"
+				+ "           				--AND TLD.Airport_Icao = ATS.Airport_Icao\r\n"
+				+ "           				AND TLD.Data_Supplier = STD.Data_Supplier\r\n"
+				+ "           				AND TLD.Data_Supplier = NAV.Data_Supplier\r\n"
+				+ "           				AND TLD.processing_cycle = STD.processing_cycle\r\n"
+				+ "           				AND STD.Airport_Ident = TLD.Airport_Ident\r\n"
+				+ "           				--AND STD.Airport_Icao = TLD.Airport_Icao\r\n"
+				+ "           				AND STD.Processing_Cycle = ? \r\n"
+				+ "           				AND STD.Data_Supplier = ? \r\n" + "           		)  \r\n"
+				+ "     ORDER BY 3,4  ";
+
+		recs1 = app.executeQuery(notselAptCur, repBlk.getDataSupplier(), repBlk.getProcessingCycle(),
+				repBlk.getProcessingCycle(), repBlk.getDataSupplier());
+
+		if (recs1.size() > 0) {
+			lRecCount1 = lRecCount1 + 1;
+		}
+
+		if (lRecCount == 0 && repBlk.getType().equals("Y")) {
+			coreptLib.dspMsg(
+					"Report cannot be generated, there are no Airports exists\nwhich are Associated with Airport Groups");
+			throw new FormTriggerFailureException();
+		} else if (lRecCount1 == 0 && repBlk.getType().equals("N")) {
+			coreptLib.dspMsg(
+					"Report cannot be generated, there are no Airports exists\nwhich are Not Associated with Airport Groups");
+			throw new FormTriggerFailureException();
+		}
+
+		log.info("exported Successfully");
+		return lRecCount;
+	}
+
+	@Override
+	public ResponseEntity<ResponseDto<ExportDestinationTriggerResponseDto>> exportDestination(
+			ExportDestinationTriggerRequestDto reqDto) throws Exception {
+		log.info(" whenValidateRecord Executing");
+		BaseResponse<ExportDestinationTriggerResponseDto> responseObj = new BaseResponse<>();
+		ExportDestinationTriggerResponseDto resDto = new ExportDestinationTriggerResponseDto();
+		try {
+			OracleHelpers.bulkClassMapper(reqDto, this);
+			Integer lRecCount;
+			String lsPrimaryFocal = null;
+			BlockDetail mstBlockData = null;
+			mstBlockData = reqDto.getExportDataBlocks().get("repBlk");
+			repBlk.setType(mstBlockData.getFlag());
+			// String Builders
+			StringBuilder reportfile = new StringBuilder();
+			List<DuRecord> recs = null;
+
+			if (HoneyWellUtils.toCamelCase(system.getCursorBlock()).equals("repBlk")) {
+				lRecCount = 0;
+				if (repBlk.getType().equals("Y")) {
+					mstBlockData = reqDto.getExportDataBlocks().get("repBlk");
+					List<String> mstPromptNames = getBlockMetaData(mstBlockData, "PROMPT_NAME");
+					List<String> mstDatabseColumns = getBlockMetaData(mstBlockData, "DATABASE_COLUMN");
+					String selAptCur = """
+									 SELECT distinct --STD.*,
+							      SBAG.Group_Name,
+							      NAV.NavDB_ID,
+							      NAV.Data_Supplier,
+							      Include_Exclude_Ind,
+							      STD.Airport_Ident,
+							      STD.Airport_Icao,
+							      Production_Ready_Ind,
+							      Primary_Focal
+							 FROM SELECT_BY_AIRPORT_GROUP SBAG,
+							      AIRPORT_TO_SELECT ATS,
+							      NAVDB NAV,
+							      PL_TLD_AIRPORT TLD,
+							      PL_STD_AIRPORT STD
+							WHERE SBAG.Select_by_ID = ATS.Select_by_ID
+							      AND NAV.NavDB_ID = SBAG.NavDB_ID
+							      AND NAV.NavDB_ID = TLD.Customer_Ident
+							      AND TLD.Airport_Ident = ATS.Airport_Ident
+							      --AND TLD.Airport_Icao = ATS.Airport_Icao
+							      AND STD.Airport_Ident = TLD.Airport_Ident
+							      --AND STD.Airport_Icao = TLD.Airport_Icao
+							      AND TLD.Data_Supplier = STD.Data_Supplier
+							      AND TLD.Data_Supplier = NAV.Data_Supplier
+							      AND TLD.Processing_Cycle = STD.Processing_Cycle
+							      AND STD.Processing_Cycle = ?
+							      AND STD.Data_Supplier = ?
+							 ORDER BY STD.Airport_Ident,STD.Airport_Icao,Group_Name
+									""";
+
+					// Header Building..
+					reportfile.append(getExportHeader(mstPromptNames, 0, selectOptions.getDelimiter()));
+					recs = app.executeQuery(selAptCur, mstBlockData.getProcessingCycle(),
+							mstBlockData.getDataSupplier());
+					int i = 1;
+					for (DuRecord mstRec : recs) {
+						lRecCount = lRecCount + 1;
+						if (lRecCount == 1) {
+							String primaryFocal = (String) mstRec.getObject("PRIMARY_FOCAL");
+							if (primaryFocal != null) {
+								try {
+									String query1 = """
+											SELECT DECODE(LAST_NAME,NULL,FIRST_NAME,FIRST_NAME||' '||LAST_NAME ),FIRST_NAME --rlabel,LOGON_ID rvalue, logon_id
+
+														  	     FROM COREPT_USER
+															 	     WHERE LOGON_ID = ?
+															 	     """;
+
+									List<DuRecord> recs1 = app.executeQuery(query1, primaryFocal);
+									lsPrimaryFocal = recs1.getFirst().getString();
+								} catch (Exception e) {
+									lsPrimaryFocal = primaryFocal;
+								}
+
+								if (lsPrimaryFocal.isEmpty()) {
+									lsPrimaryFocal = primaryFocal;
+								}
+							}
+
+						} else if (lRecCount > 1) {
+							String primaryFocal = (String) mstRec.getObject("PRIMARY_FOCAL");
+							if (primaryFocal != null) {
+								try {
+									String query1 = """
+											SELECT DECODE(LAST_NAME,NULL,FIRST_NAME,FIRST_NAME||' '||LAST_NAME ),FIRST_NAME --rlabel,LOGON_ID rvalue, logon_id
+
+														  	     FROM COREPT_USER
+															 	     WHERE LOGON_ID = ?
+															 	     """;
+
+									List<DuRecord> recs1 = app.executeQuery(query1, primaryFocal);
+									lsPrimaryFocal = recs1.getFirst().getString();
+								} catch (Exception e) {
+									lsPrimaryFocal = primaryFocal;
+								}
+
+								if (lsPrimaryFocal.isEmpty()) {
+									lsPrimaryFocal = primaryFocal;
+								}
+							}
+						}
+
+						RepBlk repBlk = app.mapResultSetToClass(mstRec, RepBlk.class);
+						repBlk.setSNo(i);
+						repBlk.setPrimaryFocal(lsPrimaryFocal);
+
+						reportfile.append(getExportData(repBlk, mstDatabseColumns, 0, selectOptions.getDelimiter(),
+								selectOptions.getGetTextFile()));
+
+						i++;
+					}
+
+					lsPrimaryFocal = null;
+
+				} else if (repBlk.getType().equals("N")) {
+					mstBlockData = reqDto.getExportDataBlocks().get("repBlk");
+					List<String> mstPromptNames = getBlockMetaData(mstBlockData, "PROMPT_NAME");
+					List<String> mstDatabseColumns = getBlockMetaData(mstBlockData, "DATABASE_COLUMN");
+					String notselAptCur = """
+												SELECT DISTINCT N.NavDB_ID,
+							               N.Data_Supplier,
+							               S.Airport_Ident Std_Airport_Ident,
+							               S.Airport_Icao Std_Airport_Icao,
+							               T.Airport_Ident Tld_Airport_Ident,
+							               T.Airport_Icao Tld_Airport_Icao,
+							               Production_Ready_Ind,
+							               Primary_Focal
+							FROM PL_STD_AIRPORT S,
+							     PL_TLD_AIRPORT T,
+							     NavDB N
+							WHERE S.Airport_Ident = T.Airport_Ident
+							--AND S.Airport_Icao = T.Airport_Icao
+							AND S.Processing_Cycle = T.Processing_Cycle
+							AND S.Data_Supplier = T.Data_Supplier
+							AND S.Data_Supplier = N.Data_Supplier
+							AND T.Customer_Ident = N.navdb_id
+							AND S.Data_Supplier = ?
+							AND S.Processing_Cycle = ?
+							AND S.Airport_Ident--,S.Airport_Icao)
+							NOT IN ( SELECT STD.Airport_Ident
+							        						--STD.Airport_Icao
+							   					 FROM SELECT_BY_AIRPORT_GROUP SBAG,
+							        						AIRPORT_TO_SELECT ATS,
+							        						NAVDB NAV,
+							        						PL_TLD_AIRPORT TLD,
+							        						PL_STD_AIRPORT STD
+							  						WHERE SBAG.Select_By_ID = ATS.Select_By_ID
+							        				AND NAV.NavDB_ID = SBAG.NavDB_ID
+							        				AND NAV.NavDB_ID = TLD.Customer_Ident
+							        				AND TLD.Airport_Ident = ATS.Airport_Ident
+							        				--AND TLD.Airport_Icao = ATS.Airport_Icao
+							        				AND TLD.Data_Supplier = STD.Data_Supplier
+							        				AND TLD.Data_Supplier = NAV.Data_Supplier
+							        				AND TLD.processing_cycle = STD.processing_cycle
+							        				AND STD.Airport_Ident = TLD.Airport_Ident
+							        				--AND STD.Airport_Icao = TLD.Airport_Icao
+							        				AND STD.Processing_Cycle = ?
+							        				AND STD.Data_Supplier = ?
+							        		)
+							  ORDER BY 3,4
+											""";
+
+					// Header Building..
+					reportfile.append(getExportHeader(mstPromptNames, 0, selectOptions.getDelimiter()));
+					recs = app.executeQuery(notselAptCur, mstBlockData.getDataSupplier(),
+							mstBlockData.getProcessingCycle(), mstBlockData.getProcessingCycle(),
+							mstBlockData.getDataSupplier());
+					int i = 1;
+					for (DuRecord mstRec : recs) {
+						lRecCount = lRecCount + 1;
+						if (lRecCount == 1) {
+							String primaryFocal = (String) mstRec.getObject("PRIMARY_FOCAL");
+							if (primaryFocal != null) {
+								try {
+									String query1 = """
+											SELECT DECODE(LAST_NAME,NULL,FIRST_NAME,FIRST_NAME||' '||LAST_NAME ),FIRST_NAME --rlabel,LOGON_ID rvalue, logon_id
+														  	     FROM COREPT_USER
+															 	     WHERE LOGON_ID = ?
+															 	     """;
+
+									List<DuRecord> recs1 = app.executeQuery(query1, primaryFocal);
+									lsPrimaryFocal = recs1.getFirst().getString();
+								} catch (Exception e) {
+									lsPrimaryFocal = primaryFocal;
+								}
+
+								if (lsPrimaryFocal.isEmpty()) {
+									lsPrimaryFocal = primaryFocal;
+								}
+							}
+						} else if (lRecCount > 1) {
+							String primaryFocal = (String) mstRec.getObject("PRIMARY_FOCAL");
+							if (primaryFocal != null) {
+								try {
+									String query1 = """
+											SELECT DECODE(LAST_NAME,NULL,FIRST_NAME,FIRST_NAME||' '||LAST_NAME ),FIRST_NAME --rlabel,LOGON_ID rvalue, logon_id
+														  	     FROM COREPT_USER
+															 	     WHERE LOGON_ID = ?
+															 	     """;
+
+									List<DuRecord> recs1 = app.executeQuery(query1, primaryFocal);
+									lsPrimaryFocal = recs1.getFirst().getString();
+								} catch (Exception e) {
+									lsPrimaryFocal = primaryFocal;
+								}
+
+								if (lsPrimaryFocal.isEmpty()) {
+									lsPrimaryFocal = primaryFocal;
+								}
+							}
+
+						}
+						RepBlk repBlk = app.mapResultSetToClass(mstRec, RepBlk.class);
+						repBlk.setSNo(i);
+						repBlk.setPrimaryFocal(lsPrimaryFocal);
+						reportfile.append(getExportData(repBlk, mstDatabseColumns, 0, selectOptions.getDelimiter(),
+								selectOptions.getGetTextFile()));
+						i++;
+					}
+
+					lsPrimaryFocal = null;
+				}
+
+				if (lRecCount >= 1) {
+					message("Report generated Successfully.");
+				}
+
+			}
+
+			OracleHelpers.ResponseMapper(this, resDto);
+
+			String base64 = Base64.getEncoder().encodeToString(reportfile.toString().getBytes(StandardCharsets.UTF_8));
+			ReportDetail reportDetail = new ReportDetail();
+			reportDetail.setData(base64);
+			resDto.setReport(reportDetail);
+			return responseObj.render(responseObj.formSuccessResponse(DuConstants.RECORD_FETCH, resDto));
+		} catch (Exception e) {
+			log.error("Error while Executing the displayItemBlockRefreshButtonWhenButtonPressed Service");
+			OracleHelpers.ResponseMapper(this, resDto);
+			return ExceptionUtils.handleException(e, resDto);
+		}
+
+	}
+
+	public String getExportHeader(List<String> headerColumns, int depth, String delimiter) {
+		StringBuilder header = new StringBuilder();
+		DuRecord rec;
+		try {
+			String dateQuery = """
+					     SELECT TO_CHAR(SYSDATE , 'DD-MON-YY') as formatted_date  FROM DUAL
+					""";
+
+			rec = app.selectInto(dateQuery);
+			if (depth == 0) {
+				header.append("Exported on ").append(rec.getObject()).append("\n").append("\n");
+			}
+			for (int i = 0; i < depth; i++) {
+				header.append(delimiter);
+			}
+			// Header Generator
+			for (int i = 0; i < headerColumns.size(); i++) {
+				header.append(headerColumns.get(i));
+				if (i < headerColumns.size() - 1) {
+					header.append(delimiter);
+				}
+			}
+		} catch (Exception e) {
+			log.error("Error Throwed", e);
+		}
+		header.append("\n");
+		return header.toString();
+
+	}
+
+	public String getExportData(Object obj, List<String> columns, int depth, String delimiter, String fileType) {
+		StringBuilder data = new StringBuilder();
+		for (int i = 0; i < depth; i++) {
+			data.append(delimiter);
+		}
+		data.append(ObjecttoString(obj, columns, delimiter, fileType));
+
+		data.append("\n");
+		return data.toString();
+	}
+
+	public String ObjecttoString(Object obj, List<String> fields, String delimiter, String fileType) {
+		StringBuilder result = new StringBuilder();
+		String op = null;
+		for (String field : fields) {
+			try {
+				Field f = obj.getClass().getDeclaredField(field);
+				f.setAccessible(true);
+				Object dt = f.get(obj);
+				op = toString(dt);
+				if (!OracleHelpers.isNullorEmpty(op)) {
+					op = rtrim(dt.toString());
+				}
+				if (!Objects.equals(op, null)) {
+					if (op.startsWith("$#$")) {
+						result.append(",");
+						op = op.replace("$#$", "");
+						if (op.length() == 0) {
+							op = null;
+						}
+					}
+				}
+
+				result.append(op == null ? "" : op).append(delimiter);
+
+			} catch (RuntimeException e) {
+				log.info("RuntimeException captured");
+			} catch (Exception e) {
+				result.append("\"\"");
+			}
+		}
+		return result.toString().substring(0, result.toString().length() - 1);
+	}
+
+	public void updateAppInstance() {
+		super.app = this.app;
+		super.baseInstance = this;
+		super.groups = this.groups;
+		super.genericNativeQueryHelper = this.genericNativeQueryHelper;
+		super.event = this.event;
+		super.parameter = this.parameter;
+		super.displayAlert = this.displayAlert;
+		super.system = this.system;
+		super.global = this.global;
+		super.blocksOrder = this.blocksOrder;
+		super.windows = this.windows;
+		OracleHelpers.bulkClassMapper(this, displayAlert);
+		OracleHelpers.bulkClassMapper(this, coreptLib);
+		coreptLib.initialization(this);
+		OracleHelpers.bulkClassMapper(this, coreptTemplateTriggerServiceImpl);
+		coreptTemplateTriggerServiceImpl.initialization(this);
+		OracleHelpers.bulkClassMapper(this, refreshMasterLibrary);
+		refreshMasterLibrary.initialization(this);
+	}
+
+}
